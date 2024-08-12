@@ -1,0 +1,55 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\title{Merging using Q-learning}
+\author{Charly Alizadeh}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Chordal extension}
+
+\textbf{Chordal graph}: a graph \(G=(V, E)\) is chordal iff every cycles \(C\) of four or more vertices has an edge \(e \notin C\) connecting two vertices of \(C\).
+
+
+\noindent \textbf{Chordal extension}: the chordal graph \(G'=(V', E')\) is a chordal extension of the non-chordal graph \(G=(V, E)\) if \(V = V'\) and \(E \subset E'\), i.e. \(G\) is a subgraph of \(G'\).
+
+\section{Merging a chordal a graph}
+
+\textbf{Clique}: a clique of the graph \(G\) is a subgraph \(C\) of \(G\) such that \(C\) is complete
+
+\noindent \textbf{Maximal clique}: a clique is maximal iff it is not contained in another clique
+
+\noindent \textbf{Merge iteration}: given a graph \(G\) and \(C_1=(V_1, E_1), C_2=(V_2, E_2)\) two of its maximal cliques, we merge them into one clique by making the subgraph composed of the vertices \(V=V_1 \cup V_2\) complete.
+
+\section{RL}
+
+We define a the following Q-learning algorithm:
+\begin{itemize}
+    \item Environment: The clique tree \(T=(V, E)\)
+    \item Actions: All the edges in the clique tree \(E\)
+    \item Reward function:\\
+        \begin{tabular}{|c|c|c|c|}
+            \hline
+            Name & Intermediate state ? & Final state ? & Precise ?\\
+            \hline
+            Molzahn & Yes & Yes & No\\
+            ML model & Yes & Yes & No\\
+            Solver & No & Yes & Yes\\
+            \hline
+        \end{tabular}
+    \item State or State-action function (what guides the policy): GNN
+\end{itemize}
+
+\noindent Problematics:
+\begin{itemize}
+    \item Variable actions space
+    \item We want to learn a general way of merging but all our graphs are different
+    \item Need for a database ?
+\end{itemize}
+
+
+\end{document}
