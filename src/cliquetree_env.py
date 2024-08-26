@@ -2,7 +2,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import networkx as nx
-from merge import get_clique_tree, merge_clique, compute_merge_cost
+from merge import get_clique_tree, compute_merge_cost, nintersect
 
 def read_graph(path):
     return np.loadtxt(path, dtype=int, delimiter=",")
@@ -13,26 +13,42 @@ def edge_neighbors(adj, i, j):
     neighbors.extend([(j, k) for k in adj[j]])
     return neighbors
 
+def set_node_id(graph):
+    attributes = {i: str(i) for i in range(graph.number_of_nodes())}
+    nx.set_node_attributes(graph, attributes, name="id")
+
+def set_edge_id(graph):
+    attributes = {i: str(i) for i in range(graph.number_of_edges())}
+    nx.set_edge_attributes(graph, attributes, name="id")
+
+
 class CliqueTreeState:
     def __init__(self, graph_path):
+        # Retrieve cliques
         self.graph = read_graph(graph_path)
         self.nxgraph = nx.from_numpy_array(self.graph)
-        attributes = {i: str(i) for i in range(self.graph.shape[0])}
-        nx.set_node_attributes(self.nxgraph, attributes, name="id")
+        set_node_id(self.nxgraph)
         self.cliques = list(nx.find_cliques(self.nxgraph))
-        self.nxclique_tree, self.clique_tree = get_clique_tree(self.cliques)
-        self.edges = [e for e in self.nxclique_tree.edges.data("weight", default=-1)]
-        self.edges2index = {f"{e[0]}, {e[1]}":i for i, e in enumerate(self.edges)}
-        self.edges2index.update({f"{e[1]}, {e[0]}":i for i, e in enumerate(self.edges)})
-        self.edges2edges = {f"{e[0]}, {e[1]}": (e[0], e[1]) for e in self.edges}
-        self.edges2edges = {f"{e[1]}, {e[0]}": (e[0], e[1]) for e in self.edges}
+        self.cliques = {str(i):c for i, c in enumerate(self.cliques)}
 
-    def update(self, i, k):
+        # Setup cliquetree
+        self.nxclique_tree = get_clique_tree(self.cliques)
+
+        # Setup edge list (constant)
+        self.edges_const = [(e[2]["src"], e[2]["dst"]) for e in self.nxclique_tree.edges(data=True)]
+        self.true_id = {str(i):str(i) for i, c in enumerate(self.cliques)}
+
+    def update(self, action):
+        i, k = self.edges_const[action]
         clique = list(np.union1d(self.cliques[i], self.cliques[k]))
-        self.cliques, self.clique_tree = merge_clique(i, k, clique, self.cliques, self.clique_tree)
-        nxclique_tree = nx.from_numpy_array(self.clique_tree)
-        self.edges = [e for e in nxclique_tree.edges.data("weight", default=-1)]
-        self.nedge = nxclique_tree.number_of_edges()
+        if i < k:
+            self.cliques[i].extend(self.cliques[k])
+            self.true_id[k] = i
+            del self.cliques[k]
+        else:
+            self.cliques[k].extend(self.cliques[i])
+            self.true_id[i] = k
+            del self.cliques[i]
         return clique
 
 
@@ -55,49 +71,39 @@ class CliqueTreeEnv(gym.Env):
             dtype=np.int64
         )
         self.observation = []
-        for e in self.state.edges:
+        for e in self.state.edges_const:
             self.observation.extend([
                 len(self.state.cliques[e[0]]),
                 len(self.state.cliques[e[1]]),
-                e[2]
+                nintersect(self.state.cliques[e[0]], self.state.cliques[e[1]])
             ])
         self.observation = np.array(self.observation)
         self.action_space = spaces.Discrete(self.nedge)
-        self.action_unvalid = []
+        self.action_done = []
 
     def step(self, action):
         if action in self.action_done:
-            return 0, -1, True, False, {}, False
-        self.action_unvalid.append(action)
-        i, k, w = self.state.edges[action]
-        neighbors = edge_neighbors(self.state.nxclique_tree, i, k)
+            return 0, -1, True, False, {}
+        self.action_done.append(action)
+        i, k = self.state.edges_const[action]
 
-        # Update reward
         reward = compute_merge_cost(self.state.cliques[i], self.state.cliques[k])
+        self.state.update(action)
 
-        # Update state
-        clique = self.state.update(i, k)
+        for i, e in enumerate(self.state.edges_const):
+            if i in self.action_done:
+                self.observation[i * 3] = -1
+                self.observation[i * 3 + 1] = -1
+                self.observation[i * 3 + 2] = -1
+                continue
+            c1 = self.state.cliques[self.state.true_id[e[0]]]
+            c2 = self.state.cliques[self.state.true_id[e[1]]]
+            self.observation[i * 3] = len(c1)
+            self.observation[i * 3 + 1] = len(c2)
+            self.observation[i * 3 + 2] = nintersect(c1, c2)
 
-        # Update observation
-        for n in neighbors:
-            n0 = self.state.nxgraph.nodes[int(n[0])]["id"]
-            n1 = self.state.nxgraph.nodes[int(n[1])]["id"]
-            print(f"(i, k) = ({i}, {k})")
-            for k in self.state.edges2edges.keys():
-                print(k)
-            print(f"({int(n[0])}, {int(n[1])}) => ({n0}, {n1})")
-
-
-            index = self.state.edges2index[f"{n0}, {n1}"]
-            edge = self.state.edges2edges[f"{n0}, {n1}"]
-            if edge[0] == n0:
-                self.observation[index] = len(clique)
-            else:
-                self.observation[index + 1] = len(clique)
-            self.observation[index + 2] = self.state.clique_tree[edge[0], edge[1]]
-
-        terminated =  len(self.state.cliques) <= self.stop_treshold
-        return self.observation, reward, terminated, False, {}, False
+        terminated = len(self.state.cliques) <= self.stop_treshold
+        return self.observation, reward, terminated, False, {}
 
     def reset(self, seed, options):
         return self.observation, {}
