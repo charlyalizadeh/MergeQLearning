@@ -38,17 +38,18 @@ class CliqueTreeState:
         self.edges_const = [(e[2]["src"], e[2]["dst"]) for e in self.nxclique_tree.edges(data=True)]
         self.true_id = {str(i):str(i) for i, c in enumerate(self.cliques)}
 
+    def get_clique(self, index):
+        return self.cliques[self.true_id[index]]
+
     def update(self, action):
         i, k = self.edges_const[action]
-        clique = list(np.union1d(self.cliques[i], self.cliques[k]))
-        if i < k:
-            self.cliques[i].extend(self.cliques[k])
-            self.true_id[k] = i
-            del self.cliques[k]
+        clique = list(np.union1d(self.get_clique(i), self.get_clique(k)))
+        self.cliques[self.true_id[i]] = clique
+        self.cliques[self.true_id[k]] = clique
+        if int(i) < int(k):
+            self.true_id[k] = self.true_id[i]
         else:
-            self.cliques[k].extend(self.cliques[i])
-            self.true_id[i] = k
-            del self.cliques[i]
+            self.true_id[i] = self.true_id[k]
         return clique
 
 
@@ -59,7 +60,8 @@ class CliqueTreeEnv(gym.Env):
         self.nneighbor = env_config["nneighbor"]
         self.nfeature = 1
 
-        self.state = CliqueTreeState(env_config["graph_path"])
+        self.graph_path = env_config["graph_path"]
+        self.state = CliqueTreeState(self.graph_path)
         self.nedge = self.state.nxclique_tree.number_of_edges()
         self.stop_treshold = int(0.1 * len(self.state.cliques))
         self.action_done = []
@@ -82,14 +84,14 @@ class CliqueTreeEnv(gym.Env):
         self.action_done = []
 
     def step(self, action):
+        print(f"ACTION: {action}")
         if action in self.action_done:
-            return 0, -1, True, False, {}
+            print("ALREADY DONE")
+            return self.observation, -1, True, False, {}
         self.action_done.append(action)
         i, k = self.state.edges_const[action]
-
-        reward = compute_merge_cost(self.state.cliques[i], self.state.cliques[k])
+        reward = compute_merge_cost(self.state.get_clique(i), self.state.get_clique(k))
         self.state.update(action)
-
         for i, e in enumerate(self.state.edges_const):
             if i in self.action_done:
                 self.observation[i * 3] = -1
@@ -101,9 +103,10 @@ class CliqueTreeEnv(gym.Env):
             self.observation[i * 3] = len(c1)
             self.observation[i * 3 + 1] = len(c2)
             self.observation[i * 3 + 2] = nintersect(c1, c2)
-
         terminated = len(self.state.cliques) <= self.stop_treshold
         return self.observation, reward, terminated, False, {}
 
     def reset(self, seed, options):
+        self.action_done = []
+        self.state = CliqueTreeState(self.graph_path)
         return self.observation, {}
